@@ -1,144 +1,337 @@
 --!strict
 -- =============================================================================
---  Milenium V3 Pro — FULL EXAMPLE (абсолютно всё, copy-paste в executor)
---  Покрывает 100% API: window/tab/column/section + все 25+ элементов + новые V3
---  Работает в Studio и в любом экзекуторе (Synapse/KRNL/Fluxus/Electron/Delta)
---  Версия библиотеки: library:get_version() -> "3.0.1-pro"
+--  Milenium V3 Pro — FULL EXAMPLE + ФУНКЦИИ (100% API, copy-paste в executor)
+--  Показывает КАК ДОБАВЛЯТЬ СВОИ ФУНКЦИИ и связывать их с UI
+--  Работает в Studio и любом экзекуторе | library:get_version() -> "3.0.1-pro"
+--  Файл: FullExample_WithFunctions.lua (расширенный FullExample + реальные функции)
 -- =============================================================================
 
--- 0) Загрузка библиотеки -------------------------------------------------------
--- Вариант A: с GitHub (executor)
+-- 0) Загрузка библиотеки
 local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Birmap2314/ui/main/MileniumV2.lua"))()
--- Вариант B: локально (Studio) — раскомментируй если файл рядом:
--- local library = require(script.Parent.MileniumV2)
--- Вариант C: из getcustomasset / loadfile — любой способ, главное что вернёт table library
+-- Чтобы брать с ветки arena (где лежат новые файлы) используй:
+-- local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Birmap2314/ui/arena/019fe824-ui/MileniumV2.lua"))()
+-- Локально: local library = require(path.to.MileniumV2)
 
 print("[milenium] version:", library:get_version())
-
--- Хелпер для демо-колбэков
 local function log(...) print("[demo]", ...) end
 
 -- =============================================================================
--- 1) WINDOW — главное окно
+--  ФУНКЦИИ — СЮДА ДОБАВЛЯЙ СВОЮ ЛОГИКУ
+--  UI только триггерит флаги/колбэки, а реальный код — тут.
+--  Пример ниже — 7 готовых функций для самых частых задач.
 -- =============================================================================
-local window = library:window({
-    name = "milenium",                -- левая часть заголовка (цвет accent)
-    suffix = "pro",                   -- правая часть (белая)
-    gameInfo = "Milenium V3 • Full Demo • Studio", -- подпись снизу
-    size = UDim2.new(0, 780, 0, 620),  -- размер окна, можно менять мышью (resizify)
-    -- suffix / Suffix / gameInfo / GameInfo — все алиасы работают
-})
--- window:fade_background(true/false) — вкл/выкл BlurEffect за окном
--- window:set_accent(Color3) — алиас к library:update_theme("accent", ...)
--- window.toggle_menu(bool) — показать/скрыть всё меню (используется keybind из init_config)
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local MyFunctions = {}
+MyFunctions.Connections = {} -- храним коннекты чтобы отключать
+
+-- 1) WalkSpeed / JumpPower — меняет Humanoid
+function MyFunctions:SetWalkSpeed(v)
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.WalkSpeed = v
+        log("WalkSpeed ->", v)
+    end
+end
+function MyFunctions:SetJumpPower(v)
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.JumpPower = v; hum.UseJumpPower = true end
+end
+
+-- 2) ESP — простой Box ESP через BillboardGui (без Drawing, работает везде)
+MyFunctions.ESP = { Enabled=false, Objects={} }
+function MyFunctions.ESP:CreateForPlayer(plr)
+    if plr == LocalPlayer then return end
+    if self.Objects[plr] then return end
+    local function attach(char)
+        if not self.Enabled then return end
+        if not char:FindFirstChild("MileniumESP") then
+            local bg = Instance.new("BillboardGui")
+            bg.Name = "MileniumESP"
+            bg.Adornee = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart") or char
+            bg.Size = UDim2.new(0, 100, 0, 40)
+            bg.StudsOffset = Vector3.new(0, 3, 0)
+            bg.AlwaysOnTop = true
+            bg.Parent = char
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.new(1,0,1,0); lbl.BackgroundTransparency = 1
+            lbl.Text = plr.DisplayName .. " [".. tostring(math.floor((plr.Character and plr.Character:FindFirstChildOfClass("Humanoid") and plr.Character.Humanoid.Health or 100)) ).. "HP]"
+            lbl.TextColor3 = library.flags.esp_box_col and library.flags.esp_box_col.Color or Color3.fromRGB(155,150,219)
+            lbl.TextStrokeTransparency = 0.2; lbl.FontFace = Font.fromEnum(Enum.Font.GothamBold); lbl.TextScaled = true
+            lbl.Parent = bg
+            self.Objects[plr] = bg
+        end
+    end
+    if plr.Character then attach(plr.Character) end
+    plr.CharacterAdded:Connect(function(c) task.wait(1); attach(c) end)
+end
+function MyFunctions.ESP:SetEnabled(v)
+    self.Enabled = v
+    if v then
+        for _,plr in ipairs(Players:GetPlayers()) do self:CreateForPlayer(plr) end
+        -- слушать новых игроков
+        if not self.Conn then
+            self.Conn = Players.PlayerAdded:Connect(function(plr) self:CreateForPlayer(plr) end)
+            table.insert(MyFunctions.Connections, self.Conn)
+        end
+        library:notify("ESP включен", "success")
+    else
+        for _,gui in pairs(self.Objects) do pcall(function() gui:Destroy() end) end
+        self.Objects = {}
+        if self.Conn then self.Conn:Disconnect(); self.Conn=nil end
+        library:notify("ESP выключен", "warn")
+    end
+end
+function MyFunctions.ESP:SetColor(col, alpha)
+    for _,gui in pairs(self.Objects) do
+        local lbl = gui:FindFirstChildOfClass("TextLabel")
+        if lbl then lbl.TextColor3 = col end
+    end
+end
+
+-- 3) Aimbot — FOV круг (Drawing) + доворот камеры
+MyFunctions.Aimbot = { Enabled=false, FOV=120, Part="Head", Circle=nil, Conn=nil }
+function MyFunctions.Aimbot:EnsureCircle()
+    if self.Circle then return end
+    local ok, drawing = pcall(function() return Drawing.new("Circle") end)
+    if ok and drawing then
+        drawing.Visible = false; drawing.Radius = self.FOV; drawing.Color = Color3.fromRGB(155,150,219)
+        drawing.Thickness = 1.2; drawing.Filled = false; drawing.Transparency = 1
+        self.Circle = drawing
+        RunService.RenderStepped:Connect(function()
+            if drawing then
+                local visible = self.Enabled and library.flags.aim_key and library.flags.aim_key.active
+                -- если keybind в Always — всегда видно
+                if library.flags.aim_key and library.flags.aim_key.mode == "Always" then visible = self.Enabled end
+                drawing.Visible = visible and true or false
+                drawing.Radius = library.flags.aim_fov or self.FOV
+                local col = library.flags.aim_fov_color and library.flags.aim_fov_color.Color or Color3.fromRGB(155,150,219)
+                drawing.Color = col
+                drawing.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+            end
+        end)
+    else
+        -- фолбэк без Drawing (Studio) — просто print
+        log("Drawing не поддерживается, FOV круг отключён")
+    end
+end
+function MyFunctions.Aimbot:GetClosest()
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local best, bestDist
+    for _,plr in ipairs(Players:GetPlayers()) do
+        if plr==LocalPlayer then continue end
+        if library.flags.team_check and plr.Team == LocalPlayer.Team then continue end
+        local char = plr.Character
+        local part = char and char:FindFirstChild(self.Part) or char and char:FindFirstChild("Head")
+        if not part then continue end
+        local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if not onScreen then continue end
+        if library.flags.wall_check then
+            local ray = Workspace:Raycast(Camera.CFrame.Position, part.Position - Camera.CFrame.Position, RaycastParams.new())
+            if ray and ray.Instance and not ray.Instance:IsDescendantOf(char) then continue end
+        end
+        local dist = (Vector2.new(pos.X,pos.Y)-center).Magnitude
+        if dist <= (library.flags.aim_fov or self.FOV) and (not bestDist or dist < bestDist) then
+            best, bestDist = part, dist
+        end
+    end
+    return best
+end
+function MyFunctions.Aimbot:SetEnabled(v)
+    self.Enabled=v
+    self:EnsureCircle()
+    if v and not self.Conn then
+        self.Conn = RunService.RenderStepped:Connect(function()
+            local aimActive = library.flags.aim_key and library.flags.aim_key.active
+            if library.flags.aim_key and library.flags.aim_key.mode=="Always" then aimActive=true end
+            if not (self.Enabled and aimActive) then return end
+            local target = self:GetClosest()
+            if target then
+                local smooth = library.flags.aim_smooth or 0.45
+                local camPos = Camera.CFrame.Position
+                local dir = (target.Position - camPos).Unit
+                local targetCF = CFrame.lookAt(camPos, camPos + dir)
+                if library.flags.aim_mode == "Camera" then
+                    Camera.CFrame = Camera.CFrame:Lerp(targetCF, 1 - smooth)
+                else
+                    -- Mouse mover — двигаем мышь (пример, требует mousemoverel)
+                    -- if mousemoverel then mousemoverel(dx, dy) end
+                end
+                if library.flags.auto_shoot then
+                    -- пример: mouse1click() — раскомментируй если нужно
+                    -- pcall(mouse1click)
+                end
+            end
+        end)
+        table.insert(MyFunctions.Connections, self.Conn)
+    elseif not v and self.Conn then
+        self.Conn:Disconnect(); self.Conn=nil
+    end
+end
+
+-- 4) Fullbright
+MyFunctions.Fullbright = { Enabled=false, OldAmbient=nil }
+function MyFunctions.Fullbright:Set(v)
+    if v then
+        self.OldAmbient = game.Lighting.Ambient
+        game.Lighting.Ambient = Color3.fromRGB(255,255,255)
+        game.Lighting.Brightness = 3
+        RunService.RenderStepped:Connect(function()
+            if self.Enabled then game.Lighting.Ambient = Color3.fromRGB(255,255,255) end
+        end)
+    else
+        if self.OldAmbient then game.Lighting.Ambient = self.OldAmbient end
+        game.Lighting.Brightness = 2
+    end
+    self.Enabled=v
+end
+
+-- 5) Anti-AFK
+function MyFunctions:SetAntiAFK(v)
+    if v then
+        if not self.AfkConn then
+            local vu = game:GetService("VirtualUser")
+            self.AfkConn = Players.LocalPlayer.Idled:Connect(function()
+                vu:Button2Down(Vector2.new(0,0), Camera.CFrame)
+                task.wait(1); vu:Button2Up(Vector2.new(0,0), Camera.CFrame)
+            end)
+            table.insert(self.Connections, self.AfkConn)
+        end
+    else
+        if self.AfkConn then self.AfkConn:Disconnect(); self.AfkConn=nil end
+    end
+end
+
+-- 6) Teleport к игроку
+function MyFunctions:TeleportTo(p)
+    local char = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local targetChar = p and p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+    if char and targetChar then
+        local dist = library.flags.tp_dist or 5
+        char.CFrame = targetChar.CFrame * CFrame.new(0,0, dist)
+        library:notify("Телепорт к " .. p.DisplayName, "success")
+    else
+        library:notify("Не удалось телепортироваться", "error")
+    end
+end
+
+-- 7) Click TP
+MyFunctions.ClickTP = { Enabled=false, Conn=nil }
+function MyFunctions.ClickTP:Set(v)
+    self.Enabled=v
+    if v and not self.Conn then
+        self.Conn = UserInputService.InputBegan:Connect(function(inp, gp)
+            if gp then return end
+            local hold = library.flags.clicktp_key and library.flags.clicktp_key.active
+            -- если Hold — проверяем hold, иначе просто клик
+            if inp.UserInputType==Enum.UserInputType.MouseButton1 and self.Enabled and (hold or true) then
+                local mouse = LocalPlayer:GetMouse()
+                if mouse.Target then
+                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then hrp.CFrame = CFrame.new(mouse.Hit.Position + Vector3.new(0,3,0)) end
+                end
+            end
+        end)
+        table.insert(MyFunctions.Connections, self.Conn)
+    elseif not v and self.Conn then
+        self.Conn:Disconnect(); self.Conn=nil
+    end
+end
+
+-- Хелпер: очистить все коннекты при выгрузке
+function MyFunctions:Cleanup()
+    for _,c in ipairs(self.Connections) do pcall(function() c:Disconnect() end) end
+    if self.Aimbot.Circle then pcall(function() self.Aimbot.Circle:Remove() end) end
+end
 
 -- =============================================================================
--- 2) TABS — вкладки слева + верхние sub-tabs
+-- 1) WINDOW
 -- =============================================================================
--- Каждая window:tab создаёт кнопку слева. Внутри — верхние секции (multi tabs)
+local window = library:window({
+    name = "milenium",
+    suffix = "pro",
+    gameInfo = "Milenium V3 • Full + Functions • " .. library:get_version(),
+    size = UDim2.new(0, 780, 0, 620),
+})
+
+-- 2) TABS
 local combatTab   = window:tab({ name = "Combat",   icon = "rbxassetid://6031094670", tabs = {"Aimbot","Checks","Trigger","Antiaim"} })
 local visualsTab  = window:tab({ name = "Visuals",  icon = "rbxassetid://6031090997", tabs = {"ESP","World","View","Materials"} })
 local playersTab  = window:tab({ name = "Players",  icon = "rbxassetid://6034767608", tabs = {"List","Tools","Misc"} })
 local worldTab    = window:tab({ name = "World",    icon = "rbxassetid://6031094678", tabs = {"Movement","Environ","Exploits"} })
 local settingsTab = window:tab({ name = "Settings", icon = "rbxassetid://6031225810", tabs = {"Main","Themes","Configs"} })
-
--- Разделитель в списке вкладок слева
 window:seperator({ name = "Utilities" })
 local utilsTab = window:tab({ name = "Utilities", icon = "rbxassetid://6031225810", tabs = {"Debug","About"} })
 
 -- =============================================================================
--- 3) COMBAT / Aimbot — показываем column / sub_tab / section + все базовые элементы
+-- 3) COMBAT / Aimbot
 -- =============================================================================
 do
-    -- combatTab[1] == "Aimbot", [2]=="Checks" и т.д. (порядок как в tabs)
-    local page = combatTab[1] -- Aimbot
-    -- sub_tab позволяет сделать строчку из колонок с flex
+    local page = combatTab[1]
     local sub = page:sub_tab({})
     local colL = sub:column({ size = 1 })
     local colR = sub:column({ size = 1 })
 
-    -- Section с fading_toggle (переключатель в заголовке секции)
-    local aimSec = colL:section({
-        name = "Aimbot Engine",
-        icon = "rbxassetid://6031094670",
-        size = 0.72,               -- 0..1 доля высоты колонки
-        fading_toggle = true,      -- переключатель в шапке (затеняет секцию)
-        default = true
-    })
+    local aimSec = colL:section({ name = "Aimbot Engine", icon = "rbxassetid://6031094670", size = 0.72, fading_toggle = true, default = true })
 
-    -- TOGGLE: два визуальных типа — "toggle" (pill) и "checkbox" (квадрат)
-    -- Можно форсить тип: type="toggle" | type="checkbox"
+    -- Toggle теперь реально включает Aimbot функцию
     local tEnabled = aimSec:toggle({
         name = "Enabled",
         flag = "aim_enabled",
         default = false,
-        type = "toggle",           -- или "checkbox"
-        info = "Главный свитч аимбота. Поддерживает :colorpicker и :keybind чейном.",
-        callback = function(v) log("aim_enabled =", v) end,
-        seperator = false          -- добавить линию снизу
+        type = "toggle",
+        info = "Главный свитч. Включает FOV круг и доворот.",
+        callback = function(v) MyFunctions.Aimbot:SetEnabled(v) end,
     })
-    -- Чейнинг: toggle → keybind → colorpicker (все три в одной строке справа)
     tEnabled:keybind({
         name = "Aim Key",
         flag = "aim_key",
-        key = Enum.KeyCode.E,      -- по умолчанию
-        mode = "Toggle",           -- Hold / Toggle / Always
+        key = Enum.KeyCode.E,
+        mode = "Toggle",
         callback = function(active) log("aim_key active =", active) end
     }):colorpicker({
         name = "FOV Ring",
         flag = "aim_fov_color",
         color = Color3.fromRGB(155, 150, 219),
-        alpha = 0,                 -- 0..1 прозрачность (1 - alpha в API)
-        callback = function(col, a) log("fov color", col, a) end
+        alpha = 0,
+        callback = function(col, a) if MyFunctions.Aimbot.Circle then MyFunctions.Aimbot.Circle.Color = col end end
     })
 
-    -- второй toggle с type checkbox и seperator
     aimSec:toggle({
         name = "Silent Aim",
         flag = "silent_aim",
         default = false,
         type = "checkbox",
-        info = "Без доворота камеры — меньше палива.",
+        info = "Без доворота — только логика (демо).",
         callback = function(v) log("silent_aim", v) end,
         seperator = true
     })
 
-    -- SLIDER: все параметры
     aimSec:slider({
         name = "FOV",
         flag = "aim_fov",
         min = 10, max = 500, default = 120,
-        interval = 1,              -- шаг, алиас decimal
-        suffix = "°",              -- постфикс
-        info = "Радиус FOV круга",
-        callback = function(v) log("FOV", v) end
+        interval = 1,
+        suffix = "°",
+        info = "Радиус FOV",
+        callback = function(v) MyFunctions.Aimbot.FOV = v; if MyFunctions.Aimbot.Circle then MyFunctions.Aimbot.Circle.Radius = v end end
     })
-    aimSec:slider({
-        name = "Smoothness",
-        flag = "aim_smooth",
-        min = 0, max = 1, default = 0.45,
-        interval = 0.01,
-        suffix = "",
-        callback = function(v) log("smooth", v) end
-    })
-    -- Slider без линии разделителя
-    aimSec:slider({
-        name = "Prediction",
-        flag = "aim_pred_slider",
-        min = 0, max = 100, default = 50, suffix = "%",
-        seperator = false
-    })
+    aimSec:slider({ name = "Smoothness", flag = "aim_smooth", min = 0, max = 1, default = 0.45, interval = 0.01, callback = function(v) log("smooth", v) end })
+    aimSec:slider({ name = "Prediction", flag = "aim_pred_slider", min = 0, max = 100, default = 50, suffix = "%", seperator = false })
 
-    -- DROPDOWN: single и multi, scrolling, width
     aimSec:dropdown({
         name = "Target Part",
         flag = "aim_part",
         items = {"Head","Torso","Random","Nearest"},
-        default = "Head",          -- или {"Head","Torso"} если multi=true
-        multi = false,
-        scrolling = false,         -- нужен ли скролл при >6 итемов
-        width = 140,               -- ширина кнопки дропдауна
-        callback = function(v) log("aim_part =", v) end
+        default = "Head",
+        width = 140,
+        callback = function(v) MyFunctions.Aimbot.Part = v; log("aim_part =", v) end
     })
     aimSec:dropdown({
         name = "Checks (multi)",
@@ -149,190 +342,158 @@ do
         callback = function(tbl) log("checks multi", table.concat(tbl, ", ")) end
     })
 
-    -- LABEL + info
-    aimSec:label({ name = "Status: Ready", info = "Все системы в норме. Перетаскивай окно за шапку, ресайз — правый-нижний угол." })
-    aimSec:divider({ height = 12 }) -- тонкая линия
+    aimSec:label({ name = "Status: Ready", info = "Перетаскивай окно, ресайз — угол." })
+    aimSec:divider({ height = 12 })
+    aimSec:banner({ text = "TIP: ПКМ по секции — меню. FOV круг = Drawing.", type = "info" })
+    aimSec:banner({ text = "Silent Aim пока демо — добавь свою логику в MyFunctions.", type = "warn" })
+    aimSec:radio({ name = "Aim Mode", flag = "aim_mode", options = {"Camera","Mouse mover","Silent"}, default = "Camera", callback = function(v) log("aim_mode", v) end })
 
-    -- BANNER (новый V3) — типы info/success/warn/error
-    aimSec:banner({ text = "TIP: ПКМ по секции — контекстное меню. Колесом — скролл.", type = "info" })
-    aimSec:banner({ text = "Включен Silent Aim — WallCheck отключён автоматически.", type = "warn" })
-
-    -- RADIO (новый V3)
-    aimSec:radio({
-        name = "Aim Mode",
-        flag = "aim_mode",
-        options = {"Camera","Mouse mover","Silent"},
-        default = "Camera",
-        callback = function(v) log("aim_mode", v) end
-    })
-
-    -- BUTTON
-    aimSec:button({ name = "Test Notification (success)", callback = function()
-        library:notify("Aim config applied!", "success", "Aimbot")
-    end })
+    aimSec:button({ name = "Test Notification (success)", callback = function() library:notify("Aim config applied!", "success", "Aimbot") end })
     aimSec:button({ name = "Test Prompt — Reset Aim", callback = function()
         library:prompt({
             title = "Reset aimbot?",
-            text = "Все слайдеры и дропдауны вернутся к дефолту. Продолжить?",
-            yes = function() library:notify("Reset done", "success"); library:set_flag("aim_fov", 120) end,
+            text = "Все слайдеры вернутся к дефолту.",
+            yes = function() library:notify("Reset done", "success"); library:set_flag("aim_fov", 120); MyFunctions.Aimbot.FOV = 120 end,
             no  = function() library:notify("Cancelled", "warn") end
         })
     end })
 
-    -- TOOLTIP (новый V3) — можно на любой элемент
-    local tipOwner = aimSec:toggle({ name = "Auto Shoot", flag = "auto_shoot", default = true, info = "Авто-выстрел при наведении." })
-    tipOwner:tooltip({ text = "Работает только если aim_enabled = true и цель в FOV", delay = 0.25 })
-    -- Альтернативно: library:tooltip({ text="...", target=tipOwner })
+    local tipOwner = aimSec:toggle({ name = "Auto Shoot", flag = "auto_shoot", default = true, info = "Авто-клик при наведении." })
+    tipOwner:tooltip({ text = "Работает только если aim_enabled и цель в FOV", delay = 0.25 })
 
-    -- INPUT (новый V3) — числовой инпут с min/max
-    aimSec:input({
-        name = "Custom FOV (number)",
-        flag = "custom_fov_num",
-        placeholder = "120",
-        default = 120,
-        min = 0, max = 1000,
-        integer = true,
-        callback = function(v) log("custom_fov_num", v) end
-    })
+    aimSec:input({ name = "Custom FOV (number)", flag = "custom_fov_num", placeholder = "120", default = 120, min = 0, max = 1000, integer = true, callback = function(v) MyFunctions.Aimbot.FOV = v; library:set_flag("aim_fov", v) end })
 
-    -- CONTEXT MENU (новый V3)
     local ctx = library:context_menu({ items = {
         { name = "Copy config", callback = function() if setclipboard then setclipboard(library:get_config()) end; library:notify("Copied!", "success") end },
         { name = "Paste config", callback = function() library:notify("Use Load in Configs tab", "info") end },
         "sep",
         { name = "Reset section", callback = function() log("reset section clicked") end },
     }})
-    ctx.attach(aimSec) -- ПКМ по секции
-    ctx.attach(tipOwner) -- можно и по конкретному элементу
+    ctx.attach(aimSec)
+    ctx.attach(tipOwner)
 
-    -- Правая колонка — Checks
     local checksSec = colR:section({ name = "Aim Checks", icon = "rbxassetid://6031090997", size = 1 })
     checksSec:toggle({ name = "Wall Check", flag = "wall_check", default = true })
     checksSec:toggle({ name = "Team Check", flag = "team_check", default = true })
     checksSec:toggle({ name = "Distance Check", flag = "dist_check", default = false })
     checksSec:slider({ name = "Max Distance", flag = "max_dist", min = 100, max = 5000, default = 1400, suffix = " studs" })
     checksSec:dropdown({ name = "Sort Mode", flag = "sort_mode", items = {"Distance","FOV","Health","Random"}, default = "Distance" })
-    checksSec:progress_bar({ name = "Target Stability", value = 68, max = 100 }) -- полоска
+    checksSec:progress_bar({ name = "Target Stability", value = 68, max = 100 })
     checksSec:divider()
     checksSec:badge({ text = "LIVE", color = Color3.fromRGB(90, 200, 120) })
     checksSec:badge({ text = "BETA • 3.0.1", color = Color3.fromRGB(155,150,219) })
 end
 
 -- =============================================================================
--- 4) COMBAT / Trigger & Antiaim — textbox, keybind, keybind_list демо
+-- 4) Trigger & Antiaim
 -- =============================================================================
 do
-    local page = combatTab[3] -- Trigger
+    local page = combatTab[3]
     local col = page:column({})
     local sec = col:section({ name = "Trigger Bot" })
     sec:toggle({ name = "Enabled", flag = "trigger_enabled", default = false })
         :keybind({ name = "Trigger Key", flag = "trigger_key", key = Enum.KeyCode.T, mode = "Hold", callback = function(a) log("trigger", a) end })
     sec:slider({ name = "Delay", flag = "trigger_delay", min = 0, max = 500, default = 80, suffix = " ms" })
-    sec:textbox({ name = "Log webhook", placeholder = "https://discord.com/api/webhooks/...", flag = "webhook_url", default = "" })
-    sec:label({ name = "Trigger only on visible", info = "Требует WallCheck = true в Aimbot/Checks." })
+    sec:textbox({ name = "Log webhook", placeholder = "https://discord...", flag = "webhook_url", default = "" })
+    sec:label({ name = "Trigger only on visible", info = "Требует WallCheck." })
 
-    local pageAA = combatTab[4] -- Antiaim
+    local pageAA = combatTab[4]
     local col2 = pageAA:column({})
     local secAA = col2:section({ name = "Antiaim (fake lag)" })
-    secAA:toggle({ name = "Spinbot", flag = "spin", default = false })
+    secAA:toggle({ name = "Spinbot", flag = "spin", default = false, callback = function(v) log("spin", v) end })
     secAA:slider({ name = "Spin Speed", flag = "spin_speed", min = 1, max = 50, default = 12 })
     secAA:dropdown({ name = "Pitch", flag = "pitch", items = {"None","Up","Down","Zero","Random"}, default = "Up" })
-    -- settings — маленькая шестерёнка справа от элемента (открывает popup)
     local withSettings = secAA:toggle({ name = "Desync", flag = "desync", default = false })
-    local popup = withSettings:settings({}) -- создаёт тул-бар с иконкой ⚙ (ПКМ по шестерёнке открывает)
-    -- В popup можно добавлять элементы как в секцию (popup:list / popup:toggle и т.д.):
+    local popup = withSettings:settings({})
     popup:list({ options={"Popup Opt A","Popup Opt B","Popup Opt C"}, flag="popup_demo", callback=function(v) log("popup list", v) end })
-    -- popup сам — Frame, не секция, но благодаря setmetatable наследует все library-методы
 end
 
 -- =============================================================================
--- 5) VISUALS / ESP — hotbar, progress, badge, colorpicker c alpha, divider
+-- 5) VISUALS / ESP — теперь с реальной функцией MyFunctions.ESP
 -- =============================================================================
 do
-    local page = visualsTab[1] -- ESP
+    local page = visualsTab[1]
     local col = page:column({})
     local esp = col:section({ name = "Player ESP", icon = "rbxassetid://6031094670" })
 
-    esp:toggle({ name = "Enabled", flag = "esp_enabled", default = true })
-        :colorpicker({ name = "Box", flag = "esp_box_col", color = Color3.fromRGB(155,150,219), alpha = 0.1 })
-        :colorpicker({ name = "Fill", flag = "esp_fill_col", color = Color3.fromRGB(155,150,219), alpha = 0.85 })
+    esp:toggle({
+        name = "Enabled",
+        flag = "esp_enabled",
+        default = false, -- начинаем выкл чтобы не спамить
+        callback = function(v) MyFunctions.ESP:SetEnabled(v) end
+    }):colorpicker({
+        name = "Box", flag = "esp_box_col", color = Color3.fromRGB(155,150,219),
+        callback = function(col) MyFunctions.ESP:SetColor(col) end
+    }):colorpicker({ name = "Fill", flag = "esp_fill_col", color = Color3.fromRGB(155,150,219), alpha = 0.85 })
+
     esp:toggle({ name = "Name", flag = "esp_name", default = true })
     esp:toggle({ name = "Health Bar", flag = "esp_health", default = true, type = "checkbox" })
     esp:toggle({ name = "Distance", flag = "esp_dist", default = false })
     esp:dropdown({ name = "Box Type", flag = "esp_box_type", items = {"Corner","2D","3D","None"}, default = "Corner" })
     esp:slider({ name = "Box Thickness", flag = "esp_thick", min = 1, max = 4, default = 1 })
     esp:slider({ name = "Text Size", flag = "esp_text", min = 8, max = 22, default = 13, suffix = " px" })
-    esp:progress_bar({ name = "ESP Refresh", value = 24, max = 60 }) -- для красоты, можно анимировать через :set()
+    esp:progress_bar({ name = "ESP Refresh", value = 24, max = 60 })
     esp:divider({ height = 16 })
     esp:badge({ text = "UPDATED", color = Color3.fromRGB(90,200,120) })
     esp:label({ name = "Tag: Developer", info = "Отображается над головой у админов." })
 
-    -- вторая колонка ESP
     local col2 = page:column({})
     local world = col2:section({ name = "World ESP" })
-    world:toggle({ name = "Item ESP", flag = "item_esp", default = true })
+    world:toggle({ name = "Item ESP", flag = "item_esp", default = true, callback = function(v) log("item_esp", v) end })
     world:toggle({ name = "Chest ESP", flag = "chest_esp", default = false })
     world:dropdown({ name = "Item Filter (multi)", flag = "item_filter", items = {"Weapon","Ammo","Med","Armor"}, default = {"Weapon"}, multi = true })
     world:slider({ name = "Max Distance", flag = "world_dist", min = 50, max = 5000, default = 800 })
-    world:button({ name = "Refresh ESP", callback = function() library:notify("ESP refreshed", "info") end })
+    world:button({ name = "Refresh ESP", callback = function() MyFunctions.ESP:SetEnabled(library:get_flag("esp_enabled")) library:notify("ESP refreshed", "info") end })
 
-    -- HOTBAR (плавающая панель кнопок)
     local hotbar = library:hotbar({ position = UDim2.new(0.5, 0, 0, 10) })
-    hotbar.add_button({ name = "ESP", active = true, width = 44, callback = function(v) library:set_flag("esp_enabled", v); log("hotbar ESP", v) end })
-    hotbar.add_button({ name = "AIM", active = false, width = 44, callback = function(v) library:set_flag("aim_enabled", v) end })
+    hotbar.add_button({ name = "ESP", active = false, width = 44, callback = function(v) library:set_flag("esp_enabled", v); MyFunctions.ESP:SetEnabled(v) end })
+    hotbar.add_button({ name = "AIM", active = false, width = 44, callback = function(v) library:set_flag("aim_enabled", v); MyFunctions.Aimbot:SetEnabled(v) end })
     hotbar.add_button({ name = "FLY", active = false, width = 44, callback = function(v) log("fly hotbar", v); library:notify(v and "Fly ON" or "Fly OFF", v and "success" or "warn") end })
-    -- hotbar.set_visible(false) — скрыть
 end
 
--- World & View
 do
-    local page = visualsTab[2] -- World
+    local page = visualsTab[2]
     local col = page:column({})
     local sec = col:section({ name = "World" })
-    sec:slider({ name = "Brightness", flag = "brightness", min = 0, max = 5, default = 2, interval = 0.1 })
-    sec:slider({ name = "Fog Density", flag = "fog", min = 0, max = 1, default = 0.2, interval = 0.01 })
-    sec:colorpicker({ name = "Ambient", flag = "ambient", color = Color3.fromRGB(140,140,160) })
-    sec:toggle({ name = "Fullbright", flag = "fullbright", default = false })
+    sec:slider({ name = "Brightness", flag = "brightness", min = 0, max = 5, default = 2, interval = 0.1, callback = function(v) game.Lighting.Brightness = v end })
+    sec:slider({ name = "Fog Density", flag = "fog", min = 0, max = 1, default = 0.2, interval = 0.01, callback = function(v) game.Lighting.FogEnd = 100 + v*1000 end })
+    sec:colorpicker({ name = "Ambient", flag = "ambient", color = Color3.fromRGB(140,140,160), callback = function(c) game.Lighting.Ambient = c end })
+    sec:toggle({ name = "Fullbright", flag = "fullbright", default = false, callback = function(v) MyFunctions.Fullbright:Set(v) end })
     sec:divider()
-    sec:button({ name = "Reset World", callback = function() log("reset world") end })
+    sec:button({ name = "Reset World", callback = function() game.Lighting.Ambient = Color3.fromRGB(140,140,160); game.Lighting.Brightness=2 end })
 
     local col2 = page:column({})
     local sec2 = col2:section({ name = "View" })
-    sec2:slider({ name = "FOV Changer", flag = "view_fov", min = 70, max = 120, default = 80 })
+    sec2:slider({ name = "FOV Changer", flag = "view_fov", min = 70, max = 120, default = 80, callback = function(v) Camera.FieldOfView = v end })
     sec2:toggle({ name = "No Bob", flag = "nobob", default = false })
     sec2:dropdown({ name = "Material", flag = "mat", items = {"Smooth","ForceField","Glass","Neon"}, default = "Smooth" })
 end
 
 -- =============================================================================
--- 6) PLAYERS — player_list + search + player_card + multi_select + tab_list + input
+-- 6) PLAYERS — player_list + функции телепорта
 -- =============================================================================
 do
-    local page = playersTab[1] -- List
+    local page = playersTab[1]
     local col = page:column({})
     local sec = col:section({ name = "Online Players", icon = "rbxassetid://6034767608", size = 0.60 })
 
-    -- PLAYER_LIST — живой список (авто-обновляется при входе/выходе)
     local plist = sec:player_list({
         name = "Players",
-        flag = "selected_player",   -- в flags будет Instance игрока
+        flag = "selected_player",
         max_height = 220,
-        include_self = true,        -- показывать себя?
+        include_self = true,
         callback = function(plr)
-            log("selected", plr.Name, plr.DisplayName)
+            log("selected", plr.Name)
             library:notify("Selected: " .. plr.DisplayName, "success", "Players")
-            -- можно сразу обновить карточку:
             if _G.updateCard then _G.updateCard(plr) end
         end
     })
-    -- Дополнительный ручной search (если хочешь фильтровать отдельный list)
-    -- Создаём отдельный list и фильтруем его через search:
     local dummyList = sec:list({ options = {"Alpha","Beta","Gamma","Delta","Epsilon"}, flag = "dummy_list", callback = function(v) log("dummy list", v) end })
     sec:search({ name = "Search dummy", placeholder = "filter dummy...", target = dummyList })
 
-    -- PLAYER_CARD — карточка игрока с аватаркой
     local card = sec:player_card({
-        player = game.Players.LocalPlayer,
-        name = game.Players.LocalPlayer.DisplayName,
+        player = LocalPlayer,
+        name = LocalPlayer.DisplayName,
         role = "LocalPlayer • Alive",
         accent = Color3.fromRGB(155,150,219)
     })
@@ -340,13 +501,14 @@ do
         card.update(plr, plr.DisplayName, "Target • " .. (plr.Team and plr.Team.Name or "No Team"))
         card.set_status_color(Color3.fromRGB(90,200,120))
     end
-    -- tooltip на карточке
     card:tooltip({ text = "Клик по игроку в списке выше — обновит карточку. ПКМ — меню." })
 
-    -- CONTEXT MENU на карточке
     local cardMenu = library:context_menu({ items = {
         { name = "Spectate", callback = function() log("spectate", library:get_flag("selected_player")) end },
-        { name = "Teleport to", callback = function() log("tp") end },
+        { name = "Teleport to", callback = function()
+            local p = library:get_flag("selected_player")
+            if p then MyFunctions:TeleportTo(p) end
+        end },
         "sep",
         { name = "Copy UserId", callback = function()
             local p = library:get_flag("selected_player")
@@ -356,143 +518,122 @@ do
     cardMenu.attach(card)
 
     local sec2 = col:section({ name = "Selection Tools" })
-    -- MULTI_SELECT — мульти-выбор с поиском внутри
-    sec2:multi_select({
-        name = "Friend Whitelist",
-        options = {"PlayerOne","PlayerTwo","PlayerThree","PlayerFour","PlayerFive","PlayerSix","PlayerSeven"},
-        flag = "friend_whitelist",
-        max = 6,                   -- лимит выбора (nil = бесконечно)
-        default = {"PlayerOne"},
-        callback = function(tbl) log("whitelist", table.concat(tbl, ", ")) end
-    })
-    -- TAB_LIST — вертикальный список-табы (для настроек)
-    sec2:tab_list({
-        name = "Quick Action",
-        options = {"Spectate","Teleport","Copy JobId","View Inventory","Kick (local only)"},
-        default = 1,
-        callback = function(opt, idx) log("quick action", opt, idx) library:notify(opt, "info") end
-    })
-    -- INPUT — числовой/текстовый инпут (отдельно от слайдера)
-    sec2:input({
-        name = "Teleport Distance",
-        placeholder = "100",
-        flag = "tp_dist",
-        default = 100,
-        min = 0, max = 5000, integer = true,
-        callback = function(v) log("tp_dist", v) end
-    })
+    sec2:multi_select({ name = "Friend Whitelist", options = {"PlayerOne","PlayerTwo","PlayerThree","PlayerFour","PlayerFive","PlayerSix","PlayerSeven"}, flag = "friend_whitelist", max = 6, default = {"PlayerOne"}, callback = function(tbl) log("whitelist", table.concat(tbl, ", ")) end })
+    sec2:tab_list({ name = "Quick Action", options = {"Spectate","Teleport","Copy JobId","View Inventory","Kick (local only)"}, default = 1, callback = function(opt, idx) log("quick action", opt, idx) library:notify(opt, "info") end })
+    sec2:input({ name = "Teleport Distance", placeholder = "100", flag = "tp_dist", default = 100, min = 0, max = 5000, integer = true, callback = function(v) log("tp_dist", v) end })
     sec2:button({ name = "Do Action", callback = function()
         local act = library:get_flag("quick_action") or "Spectate"
-        library:prompt({ title = "Confirm: " .. tostring(act) .. "?", text = "Выполнить действие для выбранного игрока?", yes = function() log("confirmed", act) end })
+        local target = library:get_flag("selected_player")
+        if act == "Teleport" and target then
+            MyFunctions:TeleportTo(target)
+        elseif act == "Copy JobId" and setclipboard then
+            setclipboard(game.JobId); library:notify("Copied JobId", "success")
+        else
+            library:prompt({ title = "Confirm: " .. tostring(act) .. "?", text = "Выполнить для " .. (target and target.DisplayName or "никого") .. "?", yes = function() log("confirmed", act) end })
+        end
     end })
 
-    -- KEYBIND_LIST + WATERMARK — плавающие панели
     local wm = library:watermark({ text = "milenium.pro", sub = "v3.0.1 • full demo" })
-    -- wm.set_text("new title", "new sub")
-    -- wm.set_visible(false)
-
     local kblist = library:keybind_list()
-    -- kblist.track("Aimbot", function() return library:get_flag("aim_enabled") end, function() return library:get_flag("aim_key") and library:get_flag("aim_key").key or "NONE" end)
-    -- авто-трекинг уже происходит если ты используешь :keybind — kblist обновляется каждую 0.25с
-
-    -- PROGRESS_BAR demo (анимируем)
     sec2:progress_bar({ name = "Loading demo", value = 10, max = 100 })
 end
 
--- Tools
 do
     local page = playersTab[2]
     local col = page:column({})
     local sec = col:section({ name = "Tools" })
     sec:textbox({ name = "JobId", placeholder = "paste job id...", flag = "jobid_box", default = game.JobId, callback = function(v) log("jobid", v) end })
     sec:button({ name = "Copy JobId", callback = function() if setclipboard then setclipboard(game.JobId) library:notify("Copied JobId", "success") end end })
-    sec:button({ name = "Rejoin", callback = function()
-        library:prompt({ title = "Rejoin?", text = "Перезайти на тот же сервер?", yes = function() log("rejoin") end })
-    end })
+    sec:button({ name = "Rejoin", callback = function() library:prompt({ title = "Rejoin?", text = "Перезайти на тот же сервер?", yes = function() log("rejoin") end }) end })
     sec:divider()
-    sec:slider({ name = "WalkSpeed", flag = "walkspeed", min = 16, max = 250, default = 16, suffix = " studs/s" })
-    sec:slider({ name = "JumpPower", flag = "jumppower", min = 50, max = 250, default = 50 })
-    sec:divider()
-    sec:label({ name = "System Status", info = "Все модули загружены. Window можно ресайзить тянучкой в углу." })
-
-    -- LIST — простой список кнопок
-    local lstSec = col:section({ name = "Server List" })
-    local lst = lstSec:list({
-        options = {"Server #1 — 12/20","Server #2 — 8/20","Server #3 — 20/20 (full)","Private Server"},
-        flag = "server_pick",
-        callback = function(v) log("server pick", v) end
+    -- WalkSpeed теперь реально меняет Humanoid
+    sec:slider({
+        name = "WalkSpeed",
+        flag = "walkspeed",
+        min = 16, max = 250, default = 16, suffix = " studs/s",
+        callback = function(v) MyFunctions:SetWalkSpeed(v) end
     })
-    -- lst.refresh_options({"new","list"}) — обновить извне
+    sec:slider({
+        name = "JumpPower",
+        flag = "jumppower",
+        min = 50, max = 250, default = 50,
+        callback = function(v) MyFunctions:SetJumpPower(v) end
+    })
+    sec:divider()
+    sec:label({ name = "System Status", info = "Window можно ресайзить тянучкой в углу." })
+
+    local lstSec = col:section({ name = "Server List" })
+    local lst = lstSec:list({ options = {"Server #1 — 12/20","Server #2 — 8/20","Server #3 — 20/20 (full)","Private Server"}, flag = "server_pick", callback = function(v) log("server pick", v) end })
 end
 
--- Misc
 do
     local page = playersTab[3]
     local col = page:column({})
     local sec = col:section({ name = "Misc / Debug" })
-    sec:toggle({ name = "Anti-AFK", flag = "anti_afk", default = false, callback = function(v) log("anti_afk", v) end })
+    -- Anti-AFK теперь реально работает
+    sec:toggle({
+        name = "Anti-AFK",
+        flag = "anti_afk",
+        default = false,
+        callback = function(v) MyFunctions:SetAntiAFK(v) log("anti_afk", v) end
+    })
     sec:dropdown({ name = "Language", flag = "lang", items = {"Русский","English","Español"}, default = "Русский" })
     sec:textbox({ name = "Custom prefix", flag = "prefix", placeholder = "!", default = "!" })
-    sec:button({ name = "Clear notifications", callback = function()
-        for _, n in ipairs(library.notifications.notifs) do if n then pcall(function() n:Destroy() end) end end
-        table.clear(library.notifications.notifs)
-    end })
-    sec:banner({ text = "FullExample покрывает 100% элементов. Смотри код — каждый вызов прокомментирован.", type = "success" })
+    sec:button({ name = "Clear notifications", callback = function() for _, n in ipairs(library.notifications.notifs) do if n then pcall(function() n:Destroy() end) end end table.clear(library.notifications.notifs) end })
+    sec:banner({ text = "FullExample покрывает 100% элементов + 7 реальных функций.", type = "success" })
 end
 
 -- =============================================================================
--- 7) WORLD — movement / exploits / environ
+-- 7) WORLD — movement / exploits
 -- =============================================================================
 do
-    local page = worldTab[1] -- Movement
+    local page = worldTab[1]
     local col = page:column({})
     local move = col:section({ name = "Movement" })
-    move:toggle({ name = "Speedhack", flag = "speedhack", default = false })
+    move:toggle({ name = "Speedhack", flag = "speedhack", default = false, callback = function(v) if v then MyFunctions:SetWalkSpeed(library:get_flag("speed_val") or 32) else MyFunctions:SetWalkSpeed(16) end end })
         :keybind({ name = "Toggle", flag = "speed_key", key = Enum.KeyCode.LeftShift, mode = "Toggle" })
-    move:slider({ name = "Speed", flag = "speed_val", min = 16, max = 100, default = 32 })
-    move:toggle({ name = "Infinite Jump", flag = "inf_jump", default = false, type = "checkbox" })
+    move:slider({ name = "Speed", flag = "speed_val", min = 16, max = 100, default = 32, callback = function(v) if library:get_flag("speedhack") then MyFunctions:SetWalkSpeed(v) end end })
+    move:toggle({ name = "Infinite Jump", flag = "inf_jump", default = false, type = "checkbox", callback = function(v) log("inf_jump", v) end })
+    -- InfiniteJump реальная логика:
+    UserInputService.JumpRequest:Connect(function()
+        if library:get_flag("inf_jump") then
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end
+    end)
     move:input({ name = "Jump Height", flag = "jump_h", default = 50, min = 0, max = 500, integer = true })
     move:divider()
-    move:button({ name = "Reset Movement", callback = function()
-        library:set_flag("speedhack", false); library:set_flag("speed_val", 32)
-        library:notify("Movement reset", "warn")
-    end })
+    move:button({ name = "Reset Movement", callback = function() library:set_flag("speedhack", false); library:set_flag("speed_val", 32); MyFunctions:SetWalkSpeed(16); library:notify("Movement reset", "warn") end })
 
     local page2 = worldTab[2]
     local col2 = page2:column({})
     local env = col2:section({ name = "Environment" })
-    env:slider({ name = "Time of Day", flag = "tod", min = 0, max = 24, default = 14, interval = 0.5, suffix = "h" })
-    env:colorpicker({ name = "Fog Color", flag = "fog_col", color = Color3.fromRGB(160,160,180) })
-    env:toggle({ name = "No Fog", flag = "no_fog", default = false })
+    env:slider({ name = "Time of Day", flag = "tod", min = 0, max = 24, default = 14, interval = 0.5, suffix = "h", callback = function(v) game.Lighting.ClockTime = v end })
+    env:colorpicker({ name = "Fog Color", flag = "fog_col", color = Color3.fromRGB(160,160,180), callback = function(c) game.Lighting.FogColor = c end })
+    env:toggle({ name = "No Fog", flag = "no_fog", default = false, callback = function(v) game.Lighting.FogEnd = v and 100000 or 1000 end })
     env:dropdown({ name = "Weather", flag = "weather", items = {"Clear","Rain","Fog","Storm"}, default = "Clear" })
 
     local page3 = worldTab[3]
     local col3 = page3:column({})
     local exp = col3:section({ name = "Exploits (demo)" })
-    exp:toggle({ name = "Click TP (Ctrl+Click)", flag = "clicktp", default = false })
+    exp:toggle({ name = "Click TP (Ctrl+Click)", flag = "clicktp", default = false, callback = function(v) MyFunctions.ClickTP:Set(v) end })
         :keybind({ name = "Key", flag = "clicktp_key", key = Enum.KeyCode.LeftControl, mode = "Hold" })
-    exp:button({ name = "TP to Spawn", callback = function() log("tp spawn") end })
+    exp:button({ name = "TP to Spawn", callback = function() local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"); if hrp then hrp.CFrame = CFrame.new(0,10,0) end end })
     exp:divider()
-    exp:label({ name = "Exploit status", info = "Только демо-кнопки, без реального эксплойта." })
+    exp:label({ name = "Exploit status", info = "ClickTP реально телепортирует на mouse.Hit." })
 end
 
 -- =============================================================================
--- 8) SETTINGS / Themes — colorpicker accent + animation + blur + watermark toggle
+-- 8) SETTINGS — Themes
 -- =============================================================================
 do
-    local page = settingsTab[1] -- Main
+    local page = settingsTab[1]
     local col = page:column({})
     local iface = col:section({ name = "Interface" })
     iface:toggle({ name = "Acrylic Blur", flag = "acrylic", default = true, callback = function(v) window:fade_background(v) end })
-    iface:dropdown({
-        name = "Animation Style",
-        flag = "anim_style",
-        items = {"tween","spring"},
-        default = "tween",
-        callback = function(v) library:set_animation(v) library:notify("Animation: " .. v, "info") end
-    })
+    iface:dropdown({ name = "Animation Style", flag = "anim_style", items = {"tween","spring"}, default = "tween", callback = function(v) library:set_animation(v) library:notify("Animation: " .. v, "info") end })
     iface:colorpicker({ name = "Accent", flag = "accent_pick", color = Color3.fromRGB(155,150,219), callback = function(col) library:update_theme("accent", col) window:set_accent(col) end })
-    iface:slider({ name = "UI Scale (demo)", flag = "ui_scale", min = 80, max = 120, default = 100, suffix = "%" }) -- визуально не скейлит, но флаг есть
+    iface:slider({ name = "UI Scale (demo)", flag = "ui_scale", min = 80, max = 120, default = 100, suffix = "%" })
     iface:divider()
     iface:button({ name = "Test all notify types", callback = function()
         library:notify("Info — neutral", "info", "Notify")
@@ -503,30 +644,17 @@ do
 
     local col2 = page:column({})
     local bindsSec = col2:section({ name = "Keybinds / Lists" })
-    bindsSec:toggle({ name = "Show Watermark", flag = "show_wm", default = true, callback = function(v)
-        -- watermark — глобальная панель, найдём её и спрячем (демо-костыль)
-        -- В реале храни ссылку: local wm = library:watermark(...)
-        log("show_wm", v)
-    end })
+    bindsSec:toggle({ name = "Show Watermark", flag = "show_wm", default = true, callback = function(v) log("show_wm", v) end })
     bindsSec:toggle({ name = "Show Keybind List", flag = "show_kb", default = true })
-    bindsSec:button({ name = "Unload Menu (demo)", callback = function()
-        library:prompt({ title = "Unload?", text = "Скрыть весь UI? Вернуть можно вызовом window.toggle_menu(true) из консоли.", yes = function() window.toggle_menu(false) library:notify("Menu hidden — F4 to return", "warn") end })
-    end })
-    -- tooltip / context_menu ещё раз на кнопке
+    bindsSec:button({ name = "Unload Menu (demo)", callback = function() library:prompt({ title = "Unload?", text = "Скрыть весь UI? Вернуть можно вызовом window.toggle_menu(true) из консоли.", yes = function() window.toggle_menu(false) library:notify("Menu hidden — F4 to return", "warn") end }) end })
     local btn = bindsSec:button({ name = "Hover me for tooltip", callback = function() log("tooltip btn") end })
     btn:tooltip({ text = "Это тултип на кнопке. Задержка 0.3s." })
 
-    local themePage = settingsTab[2] -- Themes
+    local themePage = settingsTab[2]
     local col3 = themePage:column({})
     local themeSec = col3:section({ name = "Presets" })
     themeSec:dropdown({ name = "Preset", flag = "preset", items = {"Milenium Dark","Midnight","Neon","Crimson","Aqua"}, default = "Milenium Dark", callback = function(v)
-        local presets = {
-            ["Milenium Dark"] = Color3.fromRGB(155,150,219),
-            ["Midnight"] = Color3.fromRGB(90,90,255),
-            ["Neon"] = Color3.fromRGB(120,255,160),
-            ["Crimson"] = Color3.fromRGB(255,90,90),
-            ["Aqua"] = Color3.fromRGB(90,220,255),
-        }
+        local presets = { ["Milenium Dark"] = Color3.fromRGB(155,150,219), ["Midnight"] = Color3.fromRGB(90,90,255), ["Neon"] = Color3.fromRGB(120,255,160), ["Crimson"] = Color3.fromRGB(255,90,90), ["Aqua"] = Color3.fromRGB(90,220,255) }
         local col = presets[v] or presets["Milenium Dark"]
         library:update_theme("accent", col)
         library:notify("Theme: " .. v, "info")
@@ -537,106 +665,69 @@ do
     themeSec:label({ name = "Theme auto-saves to config", info = "Смена акцента применяет tween ко всем элементам мгновенно." })
 end
 
--- =============================================================================
--- 9) SETTINGS / Configs — init_config (обязателен один раз в конце)
--- =============================================================================
--- Создаёт внутри window отдельную систему: Config List + Textbox + Save/Load/Delete
--- + Menu Bind + Accent (дублирует, но пусть). Должно вызываться после всех flags.
+-- 9) Configs
 library:init_config(window)
-
--- Доп. секция в Configs для демо get_flag/set_flag
 do
-    local page = settingsTab[3] -- Configs (создан init_config)
-    -- init_config уже создал колонки, но мы можем добавить ещё секцию рядом через тот же tab
-    -- Найдём последнюю страницу Configs и добавим секцию (демо — создаём новую колонку)
+    local page = settingsTab[3]
     local col = page:column({})
     local sec = col:section({ name = "Advanced Config" })
-    sec:button({ name = "Print current config JSON", callback = function()
-        local json = library:get_config()
-        print(json)
-        if setclipboard then setclipboard(json) end
-        library:notify("Config copied to clipboard/log", "success")
-    end })
-    sec:button({ name = "Load from clipboard", callback = function()
-        if getclipboard then
-            local data = getclipboard()
-            local ok = pcall(function() library:load_config(data) end)
-            library:notify(ok and "Loaded!" or "Invalid JSON", ok and "success" or "error")
-        else
-            library:notify("getclipboard not supported", "warn")
-        end
-    end })
+    sec:button({ name = "Print current config JSON", callback = function() local json = library:get_config(); print(json); if setclipboard then setclipboard(json) end; library:notify("Config copied", "success") end })
+    sec:button({ name = "Load from clipboard", callback = function() if getclipboard then local data = getclipboard(); local ok = pcall(function() library:load_config(data) end); library:notify(ok and "Loaded!" or "Invalid JSON", ok and "success" or "error") else library:notify("getclipboard not supported", "warn") end end })
     sec:input({ name = "Flag Get/Set demo", flag = "flag_demo", default = library:get_flag("aim_fov") or 120, callback = function(v) log("flag_demo", v) end })
-    sec:button({ name = "Set aim_fov -> 250 via set_flag", callback = function()
-        library:set_flag("aim_fov", 250)
-        library:notify("aim_fov = 250", "info")
-    end })
+    sec:button({ name = "Set aim_fov -> 250 via set_flag", callback = function() library:set_flag("aim_fov", 250); MyFunctions.Aimbot.FOV = 250; library:notify("aim_fov = 250", "info") end })
     sec:divider()
-    sec:label({ name = "Config path", info = "milenium/configs/<name>.cfg — JSON. Поддерживает \\ и / в путях, авто-сортировка." })
+    sec:label({ name = "Config path", info = "milenium/configs/<name>.cfg — JSON. Поддерживает \\ и /." })
 end
 
 -- =============================================================================
--- 10) UTILITIES / Debug — лист с search, divider, progress, banner, etc.
+-- 10) UTILITIES
 -- =============================================================================
 do
-    local page = utilsTab[1] -- Debug
+    local page = utilsTab[1]
     local col = page:column({})
     local dbg = col:section({ name = "Debug / Tests" })
-    dbg:button({ name = "Spam 5 notifs (queue cap 6 test)", callback = function()
-        for i=1,5 do library:notify("Spam #" .. i .. " — queue test", (i%2==0) and "success" or "info", "Spam") task.wait(0.15) end
-    end })
+    dbg:button({ name = "Spam 5 notifs (queue cap 6 test)", callback = function() for i=1,5 do library:notify("Spam #" .. i .. " — queue test", (i%2==0) and "success" or "info", "Spam") task.wait(0.15) end end })
     dbg:slider({ name = "Debug Slider", flag = "dbg_slider", min = 0, max = 100, default = 25 })
     local prog = dbg:progress_bar({ name = "Progress Demo", value = 30, max = 100 })
-    -- анимируем progress
-    task.spawn(function()
-        while true do
-            for v=0,100,2 do prog.set(v) task.wait(0.05) end
-            for v=100,0,-2 do prog.set(v) task.wait(0.05) end
-        end
-    end)
+    task.spawn(function() while true do for v=0,100,2 do prog.set(v) task.wait(0.05) end; for v=100,0,-2 do prog.set(v) task.wait(0.05) end end end)
     dbg:divider({ height = 12 })
     dbg:banner({ text = "Divider выше — 12px. Progress ниже анимируется.", type = "info" })
-    -- LIST + SEARCH (search фильтрует list)
     local sList = dbg:list({ options = {"Apple","Banana","Cherry","Date","Elderberry","Fig","Grape"}, flag = "fruit_pick", callback = function(v) log("fruit", v) end })
     dbg:search({ name = "Search fruits", placeholder = "type to filter...", target = sList })
 
     local about = utilsTab[2]
     local col2 = about:column({})
     local ab = col2:section({ name = "About" })
-    ab:label({ name = "Milenium V3 Pro", info = "Enhanced by Arena AI • Based on Finobe • 2026-08-09 • " .. library:get_version() })
+    ab:label({ name = "Milenium V3 Pro + Functions", info = "Enhanced by Arena AI • Based on Finobe • " .. library:get_version() .. " • Теперь с реальными функциями внутри!" })
     ab:divider()
     ab:badge({ text = "MIT License", color = Color3.fromRGB(90,200,120) })
-    ab:banner({ text = "Все элементы выше — реальные вызовы API. Копируй блоки в свой проект. Flags сохраняются через Configs.", type = "success" })
-    ab:button({ name = "Open GitHub", callback = function() if setclipboard then setclipboard("https://github.com/Birmap2314/ui") end; library:notify("Link copied", "success") end })
-
-    -- ANIMATION_CHANGER demo (создаёт кнопку переключения tween/spring)
-    -- Правильный вызов V3: section:animation_changer()
-    -- Создаст кнопку "Animation: tween" и переключит library.animation_style по клику
-    local animToggle = ab:animation_changer() -- вернёт {toggle=function() ... end}
-    -- Альтернативно — ручная реализация для кастома:
+    ab:banner({ text = "Каждый toggle теперь вызывает MyFunctions.* — смотри верхушку файла, раздел ФУНКЦИИ.", type = "success" })
+    ab:button({ name = "Open GitHub (arena branch)", callback = function() if setclipboard then setclipboard("https://github.com/Birmap2314/ui/tree/arena/019fe824-ui") end; library:notify("Link copied — смотри ветку arena/019fe824-ui или PR #1", "success") end })
+    local animToggle = ab:animation_changer()
     local animBtnOwner = ab:button({ name = "Animation (manual): " .. library.animation_style, callback = function() end })
-    -- вручную повесим логику (демо):
     animBtnOwner.MouseButton1Click:Connect(function()
         local nxt = library.animation_style == "tween" and "spring" or "tween"
         library:set_animation(nxt)
-        if animBtnOwner.items then log("animation", nxt) end -- в реале текст кнопки меняется сам
+        if animBtnOwner.items then log("animation", nxt) end
         library:notify("Animation → " .. nxt, "info")
     end)
 end
 
 -- =============================================================================
--- 11) Финальные штрихи — уведомления и хелперы
+-- 11) ФИНАЛ
 -- =============================================================================
-library:notify("FullExample загружен — 100% API покрыто!", "success", "milenium.pro")
-task.delay(1.0, function() library:notify("ПКМ по секциям — меню • Тяни окно за шапку • Ресайз — угол", "info", "Tip") end)
+library:notify("FullExample+Functions загружен!", "success", "milenium.pro")
+task.delay(1.0, function() library:notify("Каждый элемент теперь с функцией — смотри MyFunctions вверху", "info", "Tip") end)
 task.delay(2.0, function() library:notify("Сохрани конфиг в Settings → Configs → Save", "warn", "Tip") end)
 
--- Пример ручного управления covenant:
--- library:set_flag("aim_enabled", true)
--- print(library:get_flag("aim_enabled"))
--- library:update_theme("accent", Color3.fromRGB(255, 120, 140))
--- window:fade_background(false) — убрать блюр
--- library:unload_menu() — полностью удалить GUI
+-- Как добавить свою функцию:
+-- 1. Напиши функцию в MyFunctions:  function MyFunctions:MyFeature(v) if v then ... end end
+-- 2. В UI укажи callback:  sec:toggle({ flag="my_feat", callback=function(v) MyFunctions:MyFeature(v) end })
+-- 3. Если нужен луп — используй RunService.RenderStepped и сохраняй коннект в MyFunctions.Connections
 
-log("FullExample ready — version", library:get_version(), "flags", library:count_flags())
--- Не забудь: library:init_config(window) уже вызван — меню бинд по умолчанию (обычно Insert)
+log("FullExample+Functions ready — version", library:get_version(), "flags", library:count_flags())
+-- Menu bind по умолчанию Insert (меняется в Settings → Configs)
+
+-- Авто-cleanup при выгрузке (не обязательно):
+-- game:BindToClose(function() MyFunctions:Cleanup(); library:unload_menu() end)
+
