@@ -5723,12 +5723,21 @@ function Library:SetGradientAnimation(State: boolean)
 end
 function Library:CreateWindow(WindowInfo)
     WindowInfo = Library:Validate(WindowInfo, Templates.Window)
-    local ViewportSize: Vector2 = workspace.CurrentCamera.ViewportSize
-    if RunService:IsStudio() and ViewportSize.X <= 5 and ViewportSize.Y <= 5 then
+    local Camera = workspace.CurrentCamera
+    local ViewportSize: Vector2 = Camera and Camera.ViewportSize or Vector2.new(0, 0)
+    if ViewportSize.X <= 5 or ViewportSize.Y <= 5 then
+        -- Камера ещё не готова (автозапуск при входе) — ждём, иначе окно схлопнется в точку
+        local Deadline = tick() + 5
         repeat
-            ViewportSize = workspace.CurrentCamera.ViewportSize
             task.wait()
-        until ViewportSize.X > 5 and ViewportSize.Y > 5
+            Camera = workspace.CurrentCamera
+            if Camera then
+                ViewportSize = Camera.ViewportSize
+            end
+        until (ViewportSize.X > 5 and ViewportSize.Y > 5) or tick() > Deadline
+        if ViewportSize.X <= 5 or ViewportSize.Y <= 5 then
+            ViewportSize = Vector2.new(1280, 720)
+        end
     end
     local MaxX = ViewportSize.X - 64
     local MaxY = ViewportSize.Y - 64
